@@ -1,0 +1,5 @@
+import {
+  "dev/pathmin" @lib,
+  "moonbitlang/core/env",
+}
+pkgtype(kind: "executable")
