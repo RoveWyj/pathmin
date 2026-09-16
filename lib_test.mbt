@@ -156,3 +156,25 @@ test "边界：空输入与纯命令" {
     fail("边界值: " + s)
   }
 }
+
+test "有损精度裁剪：截断到指定位数" {
+  let r = optimize_precision("M 1.23456, 2.34567 L 3.00001, 4", 2)
+  let s = r.minified
+  if !s.contains("1.23") {
+    fail("应截断到 2 位小数: " + s)
+  }
+  if s.contains("1.234") {
+    fail("不应保留 3 位小数: " + s)
+  }
+}
+
+test "有损精度裁剪：多位数与科学计数法不受影响" {
+  let r = optimize_precision("M 1.23456e5, 2.5", 2)
+  let s = r.minified
+  if s.contains("1.23456") {
+    fail("尾数应被截断: " + s)
+  }
+  if !s.contains("e5") {
+    fail("指数应保留: " + s)
+  }
+}

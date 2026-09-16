@@ -17,6 +17,19 @@ fn main {
           }
         }
       }
+      "--precision" => {
+        // 有损精度模式：--precision N "<path d>"
+        if args.length() >= 3 {
+          let n = try {
+            @string.parse_int(args[1][:])
+          } catch {
+            _ => 0
+          }
+          optimize_and_print_precision(args[2], n)
+        } else {
+          println("用法: --precision <N> \"<path d>\"  (N 为保留的小数位数)")
+        }
+      }
       "--version" | "-v" => println("pathmin 0.1.0")
       _ => optimize_and_print(args[0])
     }
@@ -36,6 +49,14 @@ fn optimize_and_print(input : String) -> Unit {
   println("bytes    : \{r.original_len} -> \{r.new_len}  (saved \{saved}%)")
 }
 
+fn optimize_and_print_precision(input : String, n : Int) -> Unit {
+  let r = @lib.optimize_precision(input, n)
+  let saved = 100 * (r.original_len - r.new_len) / r.original_len
+  println("input    : \{input}")
+  println("minified : \{r.minified}  (precision=\{n})")
+  println("bytes    : \{r.original_len} -> \{r.new_len}  (saved \{saved}%)")
+}
+
 fn print_help() -> Unit {
   println("pathmin - SVG path 无损压缩器 (MoonBit)")
   println("")
@@ -43,6 +64,7 @@ fn print_help() -> Unit {
   println("  moon run cmd/main                        使用内置示例")
   println("  moon run cmd/main \"<path d>\"            压缩一段 path")
   println("  moon run cmd/main --stats \"<path d>\"...  统计命令出现次数")
+  println("  moon run cmd/main --precision <N> \"<path d>\"  有损模式：保留 N 位小数")
   println("  moon run cmd/main --help                 显示本帮助")
   println("  moon run cmd/main --version              显示版本")
 }

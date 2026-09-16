@@ -108,6 +108,44 @@ fn minify_num(s : String) -> String {
   mant + exp
 }
 
+/// 数字有损精简：在小数点后截断到 precision 位（不做四舍五入），
+/// 随后复用无损去尾零流程。precision < 0 表示不截断。
+fn minify_num_precision(s : String, precision : Int) -> String {
+  let mut t = s
+  if t.length() > 0 && t.code_unit_at(0) == '+' {
+    t = t[1:].to_owned()
+  }
+  // 定位指数分隔符，只对尾数部分截断
+  let mut exp_pos = -1
+  for i = 0; i < t.length(); i = i + 1 {
+    let c = t.code_unit_at(i)
+    if c == 'e' || c == 'E' {
+      exp_pos = i
+      break
+    }
+  }
+  let mantissa = if exp_pos >= 0 { t[:exp_pos].to_owned() } else { t }
+  let exponent = if exp_pos >= 0 { t[exp_pos:].to_owned() } else { "" }
+  // 截断：找到小数点，最多保留 precision 位小数
+  let mut truncated = mantissa
+  let mut dot = -1
+  for i = 0; i < mantissa.length(); i = i + 1 {
+    if mantissa.code_unit_at(i) == '.' {
+      dot = i
+      break
+    }
+  }
+  if dot >= 0 {
+    let frac_len = mantissa.length() - dot - 1
+    if frac_len > precision {
+      truncated = mantissa[:dot + precision + 1].to_owned()
+    }
+  }
+  // 截断后复用去尾零流程
+  let mant = minify_mantissa(truncated)
+  mant + exponent
+}
+
 /// 把命令 code unit 还原为字符字符串（SVG 均为 ASCII，安全）
 pub fn cmd_to_char(c : UInt16) -> String {
   "\{c.unsafe_to_char()}"
@@ -174,7 +212,7 @@ priv enum OutItem {
 /// 序列化：按需分隔 + 隐含命令省略。
 /// 省略规则：当前命令字母与上一命令相同，或 L/l 紧跟 M/m 时，省略字母。
 /// 同一命令的参数若超过期望数（如 M 后多个坐标对），后续参数自然隐含同命令。
-fn serialize_groups(groups : Array[CmdGroup]) -> String {
+fn serialize_groups(groups : Array[CmdGroup], precision : Int) -> String {
   let items : Array[OutItem] = []
   let mut last_letter = ""
   for i = 0; i < groups.length(); i = i + 1 {
@@ -195,7 +233,12 @@ fn serialize_groups(groups : Array[CmdGroup]) -> String {
         items.push(Letter(letter))
       }
       for j = 0; j < args.length(); j = j + 1 {
-        items.push(Number(minify_num(args[j])))
+        let num = if precision >= 0 {
+          minify_num_precision(args[j], precision)
+        } else {
+          minify_num(args[j])
+        }
+        items.push(Number(num))
       }
       last_letter = letter
     }
@@ -251,13 +294,18 @@ pub fn command_counts(d : String) -> Array[(UInt16, Int)] {
 
 /// 对外入口：解析并优化 path
 pub fn optimize(d : String) -> OptimizeResult {
-  let ts = tokens(d)
-  let groups = parse_groups(ts)
-  let out = serialize_groups(groups)
-  { minified: out, original_len: d.length(), new_len: out.length() }
+  optimize_precision(d, -1)
 }
 
 /// 便捷：直接得到优化后的字符串
 pub fn optimize_to_string(d : String) -> String {
   optimize(d).minified
+}
+
+/// 有损优化入口：截断小数位到 precision 位（precision < 0 表示不截断，保持无损）
+pub fn optimize_precision(d : String, precision : Int) -> OptimizeResult {
+  let ts = tokens(d)
+  let groups = parse_groups(ts)
+  let out = serialize_groups(groups, precision)
+  { minified: out, original_len: d.length(), new_len: out.length() }
 }
