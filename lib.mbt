@@ -120,7 +120,7 @@ struct CmdGroup {
 }
 
 /// 各 SVG 命令的期望参数个数（每组的坐标数）
-fn command_arity(c : UInt16) -> Int {
+pub fn command_arity(c : UInt16) -> Int {
   match cmd_to_string(c) {
     "M" | "m" | "L" | "l" | "T" | "t" => 2
     "H" | "h" | "V" | "v" => 1
