@@ -1,0 +1,7 @@
+# MoonBit 构建产物
+_build/
+target/
+
+# 系统文件
+.DS_Store
+Thumbs.db
