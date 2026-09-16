@@ -113,30 +113,113 @@ fn cmd_to_string(c : UInt16) -> String {
   "\{c.unsafe_to_char()}"
 }
 
-/// 序列化：按需分隔的紧凑输出。
-/// 规则：
-/// - 命令接数字 / 数字接命令：无需空格（如 M10、10L）
-/// - 数字接数字：仅当下一个数字不以 -/+ 开头时需要空格（如 10 20）
-/// - 命令接命令：保留一个空格（避免个别解析器歧义）
-fn serialize(a : Array[Token]) -> String {
-  let mut out = ""
-  for i = 0; i < a.length(); i = i + 1 {
-    if i > 0 {
-      match (a[i - 1], a[i]) {
-        (Num(_), Num(s)) => {
-          let ms = minify_num(s)
-          let first = ms.code_unit_at(0)
-          if !(first == '-' || first == '+') {
-            out = out + " "
-          }
+/// 命令组：一个命令字母 + 跟随它的数字参数
+struct CmdGroup {
+  code : UInt16
+  args : Array[String]
+}
+
+/// 各 SVG 命令的期望参数个数（每组的坐标数）
+fn command_arity(c : UInt16) -> Int {
+  match cmd_to_string(c) {
+    "M" | "m" | "L" | "l" | "T" | "t" => 2
+    "H" | "h" | "V" | "v" => 1
+    "C" | "c" | "Q" | "q" | "S" | "s" => 4
+    "A" | "a" => 7
+    _ => 0 // Z/z 及其它
+  }
+}
+
+/// 把平铺 token 序列按命令分组。
+/// 每个命令组的参数可能超出期望个数（如 M 后连续坐标隐含 L），
+/// 拆分成标准 sizing 的 chunk 在序列化阶段处理。
+fn parse_groups(a : Array[Token]) -> Array[CmdGroup] {
+  let groups : Array[CmdGroup] = []
+  let mut cur : CmdGroup = { code: 0, args: [] } // 占位初始化
+  let mut started = false
+  for t in a {
+    match t {
+      Cmd(c) => {
+        if started {
+          groups.push(cur)
         }
-        (Cmd(_), Cmd(_)) => out = out + " "
-        _ => ()
+        cur = { code: c, args: [] }
+        started = true
+      }
+      Num(s) => cur.args.push(s)
+      _ => ()
+    }
+  }
+  if started {
+    groups.push(cur)
+  }
+  groups
+}
+
+/// 判断两个「输出项」之间是否需要空格分隔。
+/// 规则：数字接数字且后者不以 -/+ 开头时需要；命令字母接命令字母时需要。
+fn need_space(prev_is_num : Bool, cur_is_num : Bool, cur_first : UInt16) -> Bool {
+  if prev_is_num && cur_is_num {
+    // 后一个数字以 -/+ 开头可省略空格（如 1.5-2.5）
+    return !(cur_first == '-' || cur_first == '+')
+  }
+  (!prev_is_num) && (!cur_is_num)
+}
+
+/// 输出项：命令字母 或 数字字面量
+enum OutItem {
+  Letter(String)
+  Number(String)
+}
+
+/// 序列化：按需分隔 + 隐含命令省略。
+/// 省略规则：当前命令字母与上一命令相同，或 L/l 紧跟 M/m 时，省略字母。
+/// 同一命令的参数若超过期望数（如 M 后多个坐标对），后续参数自然隐含同命令。
+fn serialize_groups(groups : Array[CmdGroup]) -> String {
+  let items : Array[OutItem] = []
+  let mut last_letter = ""
+  for i = 0; i < groups.length(); i = i + 1 {
+    let g = groups[i]
+    let arity = command_arity(g.code)
+    let letter = cmd_to_string(g.code)
+    let args = g.args
+    if arity == 0 {
+      // Z/z 等无参数命令
+      items.push(Letter(letter))
+      last_letter = letter
+    } else {
+      // 省略判断：同命令延续，或 L/l 紧跟 M/m（M 隐含 L）
+      let omit =
+        letter == last_letter ||
+          ((letter == "L" || letter == "l") && (last_letter == "M" || last_letter == "m"))
+      if !omit {
+        items.push(Letter(letter))
+      }
+      for j = 0; j < args.length(); j = j + 1 {
+        items.push(Number(minify_num(args[j])))
+      }
+      last_letter = letter
+    }
+  }
+  // 线性拼接
+  let mut out = ""
+  for i = 0; i < items.length(); i = i + 1 {
+    if i > 0 {
+      let prev = items[i - 1]
+      let cur = items[i]
+      let prev_is_num = match prev { Number(_) => true; _ => false }
+      let cur_is_num = match cur { Number(_) => true; _ => false }
+      let cur_first = match cur {
+        Number(s) => s.code_unit_at(0)
+        Letter(s) => s.code_unit_at(0)
+      }
+      if need_space(prev_is_num, cur_is_num, cur_first) {
+        out = out + " "
       }
     }
-    match a[i] {
-      Cmd(c) => out = out + cmd_to_string(c)
-      Num(s) => out = out + minify_num(s)
+    match items[i] {
+      Letter(s) => out = out + s
+      Number(s) => out = out + s
     }
   }
   out
@@ -170,7 +253,8 @@ pub fn command_counts(d : String) -> Array[(UInt16, Int)] {
 /// 对外入口：解析并优化 path
 pub fn optimize(d : String) -> OptimizeResult {
   let ts = tokens(d)
-  let out = serialize(ts)
+  let groups = parse_groups(ts)
+  let out = serialize_groups(groups)
   { minified: out, original_len: d.length(), new_len: out.length() }
 }
 
