@@ -201,8 +201,8 @@ fn serialize_groups(groups : Array[CmdGroup]) -> String {
       last_letter = letter
     }
   }
-  // 线性拼接
-  let mut out = ""
+  // 线性拼接（StringBuilder 避免 O(n²) 字符串拼接）
+  let buf = StringBuilder::new()
   for i = 0; i < items.length(); i = i + 1 {
     if i > 0 {
       let prev = items[i - 1]
@@ -214,15 +214,15 @@ fn serialize_groups(groups : Array[CmdGroup]) -> String {
         Letter(s) => s.code_unit_at(0)
       }
       if need_space(prev_is_num, cur_is_num, cur_first) {
-        out = out + " "
+        buf.write_char(' ')
       }
     }
     match items[i] {
-      Letter(s) => out = out + s
-      Number(s) => out = out + s
+      Letter(s) => buf.write_string(s)
+      Number(s) => buf.write_string(s)
     }
   }
-  out
+  buf.to_string()
 }
 
 /// 统计各命令出现次数（演示 ADT + 模式匹配）
