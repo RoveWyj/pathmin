@@ -109,19 +109,19 @@ fn minify_num(s : String) -> String {
 }
 
 /// 把命令 code unit 还原为字符字符串（SVG 均为 ASCII，安全）
-fn cmd_to_string(c : UInt16) -> String {
+pub fn cmd_to_char(c : UInt16) -> String {
   "\{c.unsafe_to_char()}"
 }
 
 /// 命令组：一个命令字母 + 跟随它的数字参数
-struct CmdGroup {
+priv struct CmdGroup {
   code : UInt16
   args : Array[String]
 }
 
 /// 各 SVG 命令的期望参数个数（每组的坐标数）
 pub fn command_arity(c : UInt16) -> Int {
-  match cmd_to_string(c) {
+  match cmd_to_char(c) {
     "M" | "m" | "L" | "l" | "T" | "t" => 2
     "H" | "h" | "V" | "v" => 1
     "C" | "c" | "Q" | "q" | "S" | "s" => 4
@@ -147,7 +147,6 @@ fn parse_groups(a : Array[Token]) -> Array[CmdGroup] {
         started = true
       }
       Num(s) => cur.args.push(s)
-      _ => ()
     }
   }
   if started {
@@ -167,7 +166,7 @@ fn need_space(prev_is_num : Bool, cur_is_num : Bool, cur_first : UInt16) -> Bool
 }
 
 /// 输出项：命令字母 或 数字字面量
-enum OutItem {
+priv enum OutItem {
   Letter(String)
   Number(String)
 }
@@ -181,7 +180,7 @@ fn serialize_groups(groups : Array[CmdGroup]) -> String {
   for i = 0; i < groups.length(); i = i + 1 {
     let g = groups[i]
     let arity = command_arity(g.code)
-    let letter = cmd_to_string(g.code)
+    let letter = cmd_to_char(g.code)
     let args = g.args
     if arity == 0 {
       // Z/z 等无参数命令
@@ -202,7 +201,7 @@ fn serialize_groups(groups : Array[CmdGroup]) -> String {
     }
   }
   // 线性拼接（StringBuilder 避免 O(n²) 字符串拼接）
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for i = 0; i < items.length(); i = i + 1 {
     if i > 0 {
       let prev = items[i - 1]
