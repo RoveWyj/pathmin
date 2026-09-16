@@ -17,9 +17,26 @@ fn is_cmd(c : UInt16) -> Bool {
   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-/// 判断是否数字字符（含符号、小数点、指数）
-fn is_num_char(c : UInt16) -> Bool {
-  (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E'
+/// 判断是否可作为数字的开头（含符号、小数点）
+fn is_num_start(c : UInt16) -> Bool {
+  (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+'
+}
+
+/// 判断字符是否延续当前数字：
+/// 数字、小数点、指数符 e/E 直接延续；+/- 仅在紧跟 e/E 时延续，
+/// 其余情况（如 "1.5-2.5" 中的 "-"）属于下一个数字的开头。
+fn continues_num(d : String, pos : Int) -> Bool {
+  let c = d.code_unit_at(pos)
+  if (c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E' {
+    return true
+  }
+  if c == '-' || c == '+' {
+    if pos > 0 {
+      return d.code_unit_at(pos - 1) == 'e' || d.code_unit_at(pos - 1) == 'E'
+    }
+    return false
+  }
+  false
 }
 
 /// 词法扫描：把 d 字符串切成 token 序列
@@ -32,9 +49,9 @@ pub fn tokens(d : String) -> Array[Token] {
     if is_cmd(c) {
       arr.push(Cmd(c))
       i = i + 1
-    } else if is_num_char(c) {
-      let mut j = i
-      while j < n && is_num_char(d.code_unit_at(j)) {
+    } else if is_num_start(c) {
+      let mut j = i + 1
+      while j < n && continues_num(d, j) {
         j = j + 1
       }
       arr.push(Num(d[i:j].to_owned()))
@@ -46,12 +63,9 @@ pub fn tokens(d : String) -> Array[Token] {
   arr
 }
 
-/// 数字字面量无损精简：去前导 +，去小数尾零与末尾小数点
-fn minify_num(s : String) -> String {
+/// 尾数部分无损精简：去小数尾零与末尾小数点
+fn minify_mantissa(s : String) -> String {
   let mut t = s
-  if t.length() > 0 && t.code_unit_at(0) == '+' {
-    t = t[1:].to_owned()
-  }
   if t.contains(".") {
     while t.length() > 0 && t.code_unit_at(t.length() - 1) == '0' {
       t = t[:t.length() - 1].to_owned()
@@ -60,10 +74,38 @@ fn minify_num(s : String) -> String {
       t = t[:t.length() - 1].to_owned()
     }
   }
-  if t.length() == 0 || t == "-" || t == "." {
+  if t.length() == 0 || t == "-" || t == "." || t == "-." {
     t = "0"
   }
   t
+}
+
+/// 数字字面量无损精简：去前导 +，去小数尾零与末尾小数点；
+/// 科学计数法（e/E 指数）中的指数部分保持原样，避免数值被破坏。
+fn minify_num(s : String) -> String {
+  let mut t = s
+  if t.length() > 0 && t.code_unit_at(0) == '+' {
+    t = t[1:].to_owned()
+  }
+  // 定位指数分隔符 e/E（若存在）
+  let mut exp_pos = -1
+  for i = 0; i < t.length(); i = i + 1 {
+    let c = t.code_unit_at(i)
+    if c == 'e' || c == 'E' {
+      exp_pos = i
+      break
+    }
+  }
+  let mantissa = if exp_pos >= 0 { t[:exp_pos].to_owned() } else { t }
+  let exponent = if exp_pos >= 0 { t[exp_pos:].to_owned() } else { "" }
+  // 尾数去尾零与末尾小数点
+  let mant = minify_mantissa(mantissa)
+  // 指数部分仅去 e/E 后的前导 +（如 e+10 -> e10），其余保持
+  let mut exp = exponent
+  if exp.length() > 1 && exp.code_unit_at(1) == '+' {
+    exp = exp[0:1].to_owned() + exp[2:].to_owned()
+  }
+  mant + exp
 }
 
 /// 把命令 code unit 还原为字符字符串（SVG 均为 ASCII，安全）
@@ -71,17 +113,31 @@ fn cmd_to_string(c : UInt16) -> String {
   "\{c.unsafe_to_char()}"
 }
 
-/// 序列化：紧凑输出（每 token 一个空格，去掉逗号与多余空白）
+/// 序列化：按需分隔的紧凑输出。
+/// 规则：
+/// - 命令接数字 / 数字接命令：无需空格（如 M10、10L）
+/// - 数字接数字：仅当下一个数字不以 -/+ 开头时需要空格（如 10 20）
+/// - 命令接命令：保留一个空格（避免个别解析器歧义）
 fn serialize(a : Array[Token]) -> String {
   let mut out = ""
-  for t in a {
-    match t {
-      Cmd(c) => out = out + " " + cmd_to_string(c)
-      Num(s) => out = out + " " + minify_num(s)
+  for i = 0; i < a.length(); i = i + 1 {
+    if i > 0 {
+      match (a[i - 1], a[i]) {
+        (Num(_), Num(s)) => {
+          let ms = minify_num(s)
+          let first = ms.code_unit_at(0)
+          if !(first == '-' || first == '+') {
+            out = out + " "
+          }
+        }
+        (Cmd(_), Cmd(_)) => out = out + " "
+        _ => ()
+      }
     }
-  }
-  if out.has_prefix(" ") {
-    out = out[1:].to_owned()
+    match a[i] {
+      Cmd(c) => out = out + cmd_to_string(c)
+      Num(s) => out = out + minify_num(s)
+    }
   }
   out
 }
