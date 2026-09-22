@@ -178,3 +178,126 @@ test "有损精度裁剪：多位数与科学计数法不受影响" {
     fail("指数应保留: " + s)
   }
 }
+
+test "冗余段消除：零长度 L 段被删除" {
+  let s = remove_degenerate("M10 10 L10 10 L20 20 Z")
+  if s != "M10 10 20 20Z" {
+    fail("零长度段应被删除，实际: " + s)
+  }
+}
+
+test "冗余段消除：重复闭合只保留一个" {
+  let s = remove_degenerate("M0 0 L10 0 Z Z Z")
+  if s != "M0 0 10 0Z" {
+    fail("重复闭合应合并，实际: " + s)
+  }
+}
+
+test "冗余段消除：非零长度段保留" {
+  let s = remove_degenerate("M0 0 H10 V10 Z")
+  if s != "M0 0H10V10Z" {
+    fail("H/V 非零位移段应保留，实际: " + s)
+  }
+}
+
+test "校验：合法与非法 path" {
+  if !is_valid_path("M1,2 L3,4 Z") {
+    fail("合法 path 应通过")
+  }
+  if is_valid_path("") {
+    fail("空输入应非法")
+  }
+  if is_valid_path("1,2 M3,4") {
+    fail("数字开头应非法")
+  }
+  if is_valid_path("M1,2 L3") {
+    fail("参数不齐应非法（L 缺一个坐标）")
+  }
+}
+
+test "统计：段数 / 点数 / 命令序列" {
+  if segment_count("M1,2 L3,4 Z") != 3 {
+    fail("段数应为 3")
+  }
+  if point_count("M1,2 L3,4") != 4 {
+    fail("点数应为 4")
+  }
+  if commands("M1,2 L3,4 C5,6 7,8 9,10 11,12 Z") != "MLCZ" {
+    fail("命令序列应 MLCZ，实际: " + commands("M1,2 L3,4 C5,6 7,8 9,10 11,12 Z"))
+  }
+}
+
+test "无损自证：优化前后数字序列一致" {
+  let cases = [
+    "M 10.000, 20.000 L 30.0000, 40.0000 Z",
+    "M 1.5e10, 2.0e-3 L 3E5, 4",
+    "M1.5-2.5 L3-4",
+  ]
+  for c in cases {
+    if !verify_lossless(c) {
+      fail("应验证为无损: " + c)
+    }
+  }
+}
+
+test "展开隐含命令" {
+  let s = expand_implicit("M10 20 30 40")
+  if s != "M10 20L30 40" {
+    fail("展开隐含 L 失败，实际: " + s)
+  }
+}
+
+test "仅精简数字保留命令结构" {
+  let s = minify_numbers_only("M 10.000, 20 L 30.0, 40")
+  if s != "M10 20L30 40" {
+    fail("仅精简数字失败，实际: " + s)
+  }
+}
+
+test "按命令拆分" {
+  let parts = split_commands("M1 2 L3 4 Z")
+  if parts.length() != 3 {
+    fail("应拆成 3 段")
+  }
+  if parts[0] != "M1 2" || parts[1] != "L3 4" || parts[2] != "Z" {
+    fail("拆分内容不符: " + parts[0] + " | " + parts[1] + " | " + parts[2])
+  }
+}
+
+test "命令位置索引" {
+  let pos = command_positions("M1 2 L3 4")
+  if pos.length() != 2 || pos[0].1 != 0 || pos[1].1 != 3 {
+    fail("命令位置不符")
+  }
+}
+
+test "按子路径拆分" {
+  let sub = split_subpaths("M0 0 L10 0 Z M20 20 L30 20 Z")
+  if sub.length() != 2 {
+    fail("应拆成 2 个子路径，实际 " + sub.length().to_string())
+  }
+  if sub[0] != "M0 0 10 0Z" || sub[1] != "M20 20 30 20Z" {
+    fail("子路径内容不符: " + sub[0] + " | " + sub[1])
+  }
+}
+
+test "去重命令列表" {
+  let cmds = unique_commands("M1 2 L3 4 L5 6 Z")
+  if cmds.length() != 3 {
+    fail("应 3 个不同命令")
+  }
+}
+
+test "数字构成分类" {
+  let r = number_classification("M1.5 2 3e5 -4.0")
+  if r.0 != 1 || r.1 != 2 || r.2 != 1 {
+    fail("数字分类不符: 整数=" + r.0.to_string() + " 小数=" + r.1.to_string() + " 指数=" + r.2.to_string())
+  }
+}
+
+test "完整优化：先删冗余段再压缩" {
+  let r = optimize_full("M10 10 L10 10 L20 20 Z")
+  if r.minified != "M10 10 20 20Z" {
+    fail("完整优化失败，实际: " + r.minified)
+  }
+}
